@@ -25,7 +25,7 @@ trait ExtractionTest extends MilestoneSuite {
 
     val res =
       Extraction
-        .locateTemperatures(2015, "/stations.csv", "/2015.csv")
+        .locateTemperatures(2015, "/stations.csv", "/2015_sample.csv")
         .map(row => (row._1, row._2, BigDecimal(row._3).setScale(1, RoundingMode.HALF_UP).toDouble))
 
     val expRes = Seq(
@@ -41,7 +41,7 @@ trait ExtractionTest extends MilestoneSuite {
 
     val data =
       Extraction
-        .locateTemperatures(2015, "/stations.csv", "/2015.csv")
+        .locateTemperatures(2015, "/stations.csv", "/2015_sample.csv")
         .map(row => (row._1, row._2, BigDecimal(row._3).setScale(1, RoundingMode.HALF_UP).toDouble))
 
     val res = Extraction.locationYearlyAverageRecords(data)
@@ -54,4 +54,30 @@ trait ExtractionTest extends MilestoneSuite {
     assert(res == expRes)
   }
 
+  @Test def `Function locateTemperatures should correctly aggregate real data`: Unit = {
+
+    val data =
+      Extraction
+        .locateTemperatures(2015, "/stations.csv", "/2015.csv")
+        .map(row => (row._1, row._2, BigDecimal(row._3).setScale(1, RoundingMode.HALF_UP).toDouble))
+
+    import Extraction.spark.implicits._
+
+    Extraction.spark.sparkContext.parallelize(data.toSeq).toDF.show(false)
+  }
+
+}
+
+class locateTemperaturesTest {
+
+  @Test def `Function locateTemperatures should correctly aggregate real data`: Unit = {
+
+    val data =
+      Extraction
+        .locateTemperatures(2015, "/stations.csv", "/2015_sample.csv")
+
+    import Extraction.spark.implicits._
+
+    Extraction.spark.sparkContext.parallelize(data.toSeq).toDF.show(false)
+  }
 }

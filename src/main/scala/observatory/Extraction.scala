@@ -4,23 +4,32 @@ import java.time.LocalDate
 
 import observatory.struct.{Stations, Temperatures}
 import org.apache.log4j.{Level, Logger}
+import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
 
 import scala.io.Source
 import scala.reflect.ClassTag
+import scala.collection.JavaConverters._
 
 /**
   * 1st milestone: data extraction
   */
 object Extraction extends ExtractionInterface {
 
+  val sparkConf = new SparkConf()
+    .set("spark.driver.memory", "1536m")
+    .set("spark.executor.memory", "1536m")
+
   val spark: SparkSession =
     SparkSession
       .builder()
       .appName("Extraction")
       .master("local")
+      .config(sparkConf)
       .getOrCreate()
+
+  import spark.implicits._
 
   Logger.getLogger("org.apache.spark").setLevel(Level.WARN)
 
@@ -35,7 +44,7 @@ object Extraction extends ExtractionInterface {
    header: Boolean = false)
   (parse: Seq[String] => T): RDD[T] = {
     val datalines = Source.fromInputStream(getClass.getResourceAsStream(path), "utf-8").getLines().toSeq
-    spark.sparkContext.parallelize(datalines.map(str => parse(str.split(sep, -1))))
+    spark.sparkContext.parallelize(datalines.map(str => parse(str.split(sep, -1))), numSlices = 10000)
   }
 
   private def toDouble(s: String): Option[Double] = {
@@ -56,16 +65,24 @@ object Extraction extends ExtractionInterface {
     */
   def locateTemperatures(year: Year, stationsFile: String, temperaturesFile: String): Iterable[(LocalDate, Location, Temperature)] = {
 
-    val stations: RDD[((Option[String], Option[String]), Location)] =
+    lazy val stations: RDD[((Option[String], Option[String]), Location)] =
       sourceToRDD[Stations](stationsFile)(parseStations)
         .filter(x => x.Latitude.nonEmpty & x.Longitude.nonEmpty)
         .map(station => ((station.STN, station.WBAN), Location(station.Latitude.get, station.Longitude.get)))
 
-    val temperatures: RDD[((Option[String], Option[String]), (LocalDate, Temperature))] =
+    lazy val temperatures: RDD[((Option[String], Option[String]), (LocalDate, Temperature))] =
       sourceToRDD[Temperatures](temperaturesFile)(parseTemperatures)
         .map(temp => ((temp.STN, temp.WBAN), (LocalDate.of(year, temp.month, temp.day), (temp.tFahrenheit - 32) / 1.8)))
 
-    stations.join(temperatures).mapValues(x => (x._2._1, x._1, x._2._2)).values.collect()
+    lazy val rdd = stations
+      .join(temperatures)
+      .values
+      .map( t => (java.sql.Date.valueOf(t._2._1), t._1, t._2._2) )
+      .toDS
+
+    lazy val collected = rdd.toLocalIterator.asScala.toIterable
+
+    collected.map( t => (t._1.toLocalDate, t._2, t._3))
 
   }
 
