@@ -10,7 +10,6 @@ import org.apache.spark.sql.SparkSession
 
 import scala.io.Source
 import scala.reflect.ClassTag
-import scala.collection.JavaConverters._
 
 /**
   * 1st milestone: data extraction
@@ -25,7 +24,7 @@ object Extraction extends ExtractionInterface {
     SparkSession
       .builder()
       .appName("Extraction")
-      .master("local")
+      .master("local[40]")
       .config(sparkConf)
       .getOrCreate()
 
@@ -80,7 +79,7 @@ object Extraction extends ExtractionInterface {
       .map( t => (java.sql.Date.valueOf(t._2._1), t._1, t._2._2) )
       .toDS
 
-    lazy val collected = rdd.toLocalIterator.asScala.toIterable
+    lazy val collected = rdd.collect()
 
     collected.map( t => (t._1.toLocalDate, t._2, t._3))
 

@@ -2,20 +2,16 @@ package observatory
 
 import com.sksamuel.scrimage.{Image, Pixel}
 
-import math.{Pi, acos, cos, pow, sin, abs}
-import org.apache.spark.sql.SparkSession
+import math.{Pi, acos, cos, pow, sin, round, min, max}
+
+import scala.concurrent._
+import ExecutionContext.Implicits.global
+import scala.concurrent.duration._
 
 /**
   * 2nd milestone: basic visualization
   */
 object Visualization extends VisualizationInterface {
-
-  val spark: SparkSession =
-    SparkSession
-      .builder()
-      .appName("Visualization")
-      .master("local")
-      .getOrCreate()
 
   def greatCircleDistance(p1: Location, p2: Location): Double = {
     val r = 6371.0088 // earth approx radius
@@ -44,29 +40,22 @@ object Visualization extends VisualizationInterface {
     */
   def predictTemperature(temperatures: Iterable[(Location, Temperature)], location: Location): Temperature = {
 
-    val df = spark.sparkContext.parallelize(temperatures.toSeq)
+    val temps = temperatures.par
 
-    val dfDistance = {
-      val out = df
-        .map { case (l, t) => (greatCircleDistance(l, location), t) }
-        .filter(_._1 < 1)
-        .sortByKey(ascending = true)
-      import spark.implicits._
-      out.toDF.show(false)
-      out
-    }
+    val filtered = temps
+      .map { case (l, t) => (greatCircleDistance(l, location), t) }
+      .filter(_._1 < 1)
 
-    lazy val map = {
-      println("I'm in map!")
-      df.map { case (loc, temp) => (distanceWeight(loc, location), distanceWeight(loc, location) * temp) }
-    }
+    val reduceWeights = (v1: (Double, Double), v2: (Double, Double)) => (v1._1 + v2._1, v1._2 + v2._2)
 
-    lazy val reduce = {
-      println("I'm in reduce!")
-      map.reduce { case ((wloc1, wtemp1), (wloc2, wtemp2)) => (wloc1 + wloc2, wtemp1 + wtemp2) }
-    }
+    lazy val reduce =
+      temps
+        .map { case (loc: Location, temp: Temperature) => (distanceWeight(loc, location), distanceWeight(loc, location) * temp) }
+        .reduce(reduceWeights)
 
-    if (dfDistance.count != 0) dfDistance.first._2 else reduce._2 / reduce._1
+    if (filtered.nonEmpty) {
+      filtered.minBy(_._1)._2
+    } else reduce._2 / reduce._1
 
   }
 
@@ -77,18 +66,24 @@ object Visualization extends VisualizationInterface {
     */
   def interpolateColor(points: Iterable[(Temperature, Color)], value: Temperature): Color = {
 
-    val df = spark.sparkContext.parallelize(points.toSeq)
+    val pointsSorted = points.toSeq.sortBy(_._1)
 
-    val pair = df
-      .map{ case (temp, color) => (abs(temp - value), color)}
-      .sortByKey(ascending = true)
-      .take(2)
+    val leftEnd  = (Double.NegativeInfinity, pointsSorted.head._2)
+    val rightEnd = (Double.PositiveInfinity, pointsSorted.last._2)
+    val range    = leftEnd +: pointsSorted :+ rightEnd
 
-    def interpColor(c1: Color, c2: Color): Color =
-      Color(c1.red + c2.red / 2, c1.green + c2.green / 2, c1.blue + c2.blue / 2)
+    val (t1, c1) = range.sliding(2).toSeq.find(t => t.head._1 <= value && t.last._1 >= value).get.head
+    val (t2, c2) = range.sliding(2).toSeq.find(t => t.head._1 <= value && t.last._1 >= value).get.last
 
-    if (pair.head._1 == 0) pair.head._2 else interpColor(pair.head._2, pair.last._2)
+    val fraction =
+      if (math.abs(value - t1) == Double.PositiveInfinity) 1
+      else (value - t1) / (t2 - t1)
 
+    Color(
+      min(max(round(c1.red   * (1 - fraction)) + round(c2.red   * fraction), 0), 255) toInt,
+      min(max(round(c1.green * (1 - fraction)) + round(c2.green * fraction), 0), 255) toInt,
+      min(max(round(c1.blue  * (1 - fraction)) + round(c2.blue  * fraction), 0), 255) toInt
+    )
   }
 
   /**
@@ -98,17 +93,15 @@ object Visualization extends VisualizationInterface {
     */
   def visualize(temperatures: Iterable[(Location, Temperature)], colors: Iterable[(Temperature, Color)]): Image = {
 
-    val tempDf = spark.sparkContext.parallelize(temperatures.toSeq)
+    val temps = Future(
+      for (lon <- 90 until -90 by -1; lat <- -180 until 180)
+        yield {
+          val c = interpolateColor(colors, predictTemperature(temperatures, Location(lon, lat)))
+          Pixel(c.red, c.green, c.blue, 255)
+        }
+    )
 
-    val pixels = tempDf
-      .sortBy(_._1.lat, ascending = false)
-      .sortBy(_._1.lon, ascending = true)
-      .mapValues(temp => interpolateColor(colors, temp))
-      .values
-      .map( col => Pixel(col.red, col.green, col.blue, 0))
-      .collect()
-
-    Image.apply(360, 180, pixels)
+    Image.apply(360, 180, Await.result(temps, 20 seconds).toArray)
 
   }
 

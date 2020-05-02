@@ -67,17 +67,3 @@ trait ExtractionTest extends MilestoneSuite {
   }
 
 }
-
-class locateTemperaturesTest {
-
-  @Test def `Function locateTemperatures should correctly aggregate real data`: Unit = {
-
-    val data =
-      Extraction
-        .locateTemperatures(2015, "/stations.csv", "/2015_sample.csv")
-
-    import Extraction.spark.implicits._
-
-    Extraction.spark.sparkContext.parallelize(data.toSeq).toDF.show(false)
-  }
-}

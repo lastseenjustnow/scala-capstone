@@ -1,11 +1,11 @@
 package observatory
 
+import com.sksamuel.scrimage.{Image, Pixel}
+import observatory.util.TemperatureToColor
 import org.junit.Assert._
 import org.junit.Test
 
-import scala.math.BigDecimal.RoundingMode
-
-trait VisualizationTest extends MilestoneSuite {
+trait VisualizationTest extends MilestoneSuite with TemperatureToColor {
   private val milestoneTest = namedMilestoneTest("raw data display", 2) _
 
   @Test def `greatCircleDistance function should return correct values`: Unit = {
@@ -17,27 +17,30 @@ trait VisualizationTest extends MilestoneSuite {
     assert(math.floor(Visualization.greatCircleDistance(London, Kyiv)) == 2133.0)
   }
 
-  @Test def `predictTemperature function should return correct values`: Unit = {
-    val data =
-      Extraction
-        .locateTemperatures(2015, "/stations.csv", "src/main/resources/2015_sample.csv")
-        .map(row => (row._1, row._2, BigDecimal(row._3).setScale(1, RoundingMode.HALF_UP).toDouble))
-    val avg = Extraction.locationYearlyAverageRecords(data)
+  @Test def `interpolateColor`: Unit = {
+    lazy val res1 = Visualization.interpolateColor(tToColor, 46.0)
+    lazy val expRes1 = Color(255, 128, 128)
 
-    println(Visualization.predictTemperature(avg, Location(37.366, -78.443)))
+    lazy val res2 = Visualization.interpolateColor(tToColor, 70.0)
+    lazy val expRes2 = Color(255, 255, 255)
 
+    lazy val res3 = Visualization.interpolateColor(tToColor, -70.0)
+    lazy val expRes3 = Color(0, 0, 0)
+
+    lazy val res4 = Visualization.interpolateColor(tToColor, 16.0)
+    lazy val expRes4 = Color(255, 204, 0)
+
+    assert(res1 == expRes1)
+    assert(res2 == expRes2)
+    assert(res3 == expRes3)
+    assert(res4 == expRes4)
   }
 
+  @Test def `interpolateColor with predefined scale`: Unit = {
+    val scale = List((0.0,Color(255,0,0)), (1.52587890625E-5,Color(0,0,255)))
+    val res = Visualization.interpolateColor(scale, 0.0)
+    val expRes = Color(255,0,0)
 
-}
-
-class predictTemperatureTest {
-  @Test def `predictTemperature function should return correct values`: Unit = {
-    val data =
-      Extraction
-        .locateTemperatures(2015, "/stations.csv", "/2015.csv")
-    val avg = Extraction.locationYearlyAverageRecords(data)
-
-    println(Visualization.predictTemperature(avg, Location(37.366, -78.443)))
+    assert(res == expRes)
   }
 }
